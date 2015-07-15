@@ -1,0 +1,5 @@
+*.pyc
+*.bat
+__pycache__
+temp_test_grids/
+
