@@ -7,6 +7,7 @@ Terry Brown, Terry_N_Brown@yahoo.com, Tue Jul 14 10:29:06 2015
 """
 
 import os
+import random
 import sys
 import unittest
 
@@ -59,6 +60,63 @@ def bbox_for(grid, block):
         r = grid.left + (block.c+block.w) * grid.sizex,
         t = grid.top - block.r * abs(grid.sizey)
     )
+def cells_for_naive(grid, bbox):
+    """cells_for_naive - identify cells in grid for rectangle in map units
+    Return Block(col, row, width, height)
+
+    This "naive" version is clear, but not as efficient as cells_for()
+
+    :Parameters:
+    - `grid`: grid containing cells, as annotated by annotate_grid()
+    - `bbox`: BBox bounds in map units
+    """
+
+    # simple implementation
+    #D print (bbox)
+    #D print ((bbox.l - grid.left) / grid.sizex)
+
+    lcol = (bbox.l - grid.left) / grid.sizex
+    if lcol - int(lcol) > 0.5:
+        lcol += 1
+    lcol = int(lcol)
+
+    #D print ((bbox.r - grid.left) / grid.sizex)
+    rcol = (bbox.r - grid.left) / grid.sizex
+    if rcol - int(rcol) < 0.5:
+        rcol -= 1
+    rcol = int(rcol)
+
+    #D print((grid.top - bbox.t) / grid.sizey)
+    trow = (grid.top - bbox.t) / grid.sizey
+    if trow - int(trow) > 0.5:
+        trow += 1
+    trow = int(trow)
+    #D print((grid.top - bbox.b) / grid.sizey)
+    brow = (grid.top - bbox.b) / grid.sizey
+    if brow - int(brow) < 0.5:
+        brow -= 1
+    brow = int(brow)
+    #D print(lcol, rcol, trow, brow)
+    # a faster implementation using half grid size steps may be possible
+
+    assert bbox.t >= bbox.b
+
+    if rcol < lcol:
+        assert rcol == lcol - 1
+        rcol = lcol = int((bbox.l + (bbox.r-bbox.l)/2. - grid.left) / grid.sizex)
+    if brow < trow:
+        assert brow == trow - 1
+        brow = trow = int(grid.top - (bbox.t + (bbox.t-bbox.b)/2.) / grid.sizey)
+
+    assert rcol >= lcol, (rcol, lcol, bbox)
+    assert brow >= trow, (brow, trow, bbox)
+
+    return Block(
+        c=lcol,
+        r=trow,
+        w=rcol-lcol+1,
+        h=brow-trow+1
+    )
 def cells_for(grid, bbox):
     """cells_for - identify cells in grid for rectangle in map units
     Return Block(col, row, width, height)
@@ -67,81 +125,23 @@ def cells_for(grid, bbox):
     - `grid`: grid containing cells, as annotated by annotate_grid()
     - `bbox`: BBox bounds in map units
     """
-    
-    # raise Exception("cells_for called")
-    
-    # mid-line row / col of grid nearest line
 
-    if 0:
-        lcol = max(0, min(grid.cols-1, int( (bbox.l - grid.left) / grid.sizex ) ) )
-        trow = max(0, min(grid.rows-1, int( (grid.top - bbox.t) / abs(grid.sizey) ) ) )
-        rcol = max(0, min(grid.cols-1, int( (bbox.r - grid.left) / grid.sizex ) ) )
-        brow = max(0, min(grid.rows-1, int( (grid.top - bbox.b) / abs(grid.sizey) ) ) )
+    hx = grid.sizex / 2.
+    lcol = int((bbox.l - grid.left) / hx + 1) // 2
+    rcol = int((bbox.r - grid.left) / hx - 1) // 2
+    hy = grid.sizey / 2.
+    trow = int((grid.top - bbox.t) / hy + 1) // 2
+    brow = int((grid.top - bbox.b) / hy - 1) // 2
 
-    if 0:
-        lcol = max(0, min(grid.cols-1, int( (bbox.l - grid.left) / grid.sizex + 0.5 ) ) )
-        trow = max(0, min(grid.rows-1, int( (grid.top - bbox.t) / abs(grid.sizey) + 0.5 ) ) )
-        rcol = max(0, min(grid.cols-1, int( (bbox.r - grid.left) / grid.sizex + 0.5 ) ) )
-        brow = max(0, min(grid.rows-1, int( (grid.top - bbox.b) / abs(grid.sizey) + 0.5 ) ) )
-
-    # simple implementation
-    print (bbox)
-    print ((bbox.l - grid.left) / grid.sizex)
-    lcol = int((bbox.l - grid.left) / grid.sizex)
-    if (bbox.l - (grid.left + lcol * grid.sizex))/2. > 0.5:
-        lcol += 1
-    print ((bbox.r - grid.left) / grid.sizex)
-    rcol = int((bbox.r - grid.left) / grid.sizex)
-    if (bbox.r - (grid.left + rcol * grid.sizex))/2. < 0.5:
-        rcol -= 1
-    print((grid.top - bbox.t) / grid.sizey)
-    trow = int((grid.top - bbox.t) / grid.sizey)
-    if ((grid.top - trow * grid.sizey) - bbox.t)/2. > 0.5:
-        trow += 1
-    print((grid.top - bbox.b) / grid.sizey)
-    brow = int((grid.top - bbox.b) / grid.sizey)
-    if ((grid.top - brow * grid.sizey) - bbox.b)/2. < 0.5:
-        brow -= 1
-    print(lcol, rcol, trow, brow)
-    # a faster implementation using half grid size steps may be possible
-
-    # simple implementation
-    print (bbox)
-    print ((bbox.l - grid.left) / grid.sizex)
-    
-    lcol = (bbox.l - grid.left) / grid.sizex
-    if lcol - int(lcol) > 0.5:
-        lcol += 1
-    lcol = int(lcol)
-    
-    print ((bbox.r - grid.left) / grid.sizex)
-    rcol = (bbox.r - grid.left) / grid.sizex
-    if rcol - int(rcol) < 0.5:
-        rcol -= 1
-    rcol = int(rcol)
-    
-    print((grid.top - bbox.t) / grid.sizey)
-    trow = (grid.top - bbox.t) / grid.sizey
-    if trow - int(trow) > 0.5:
-        trow += 1
-    trow = int(trow)
-    print((grid.top - bbox.b) / grid.sizey)
-    brow = (grid.top - bbox.b) / grid.sizey
-    if brow - int(brow) < 0.5:
-        brow -= 1
-    brow = int(brow)
-    print(lcol, rcol, trow, brow)
-    # a faster implementation using half grid size steps may be possible
-    
-
-    assert bbox.t >= bbox.b
-    assert rcol >= lcol, (rcol, lcol)
-    assert brow >= trow, (brow, trow)
+    if rcol < lcol:
+        rcol = lcol = int((bbox.l + (bbox.r-bbox.l)/2. - grid.left) / grid.sizex)
+    if brow < trow:
+        brow = trow = int(grid.top - (bbox.t + (bbox.t-bbox.b)/2.) / grid.sizey)
 
     return Block(
-        c=lcol, 
-        r=trow, 
-        w=rcol-lcol+1, 
+        c=lcol,
+        r=trow,
+        w=rcol-lcol+1,
         h=brow-trow+1
     )
 class TestUtils(unittest.TestCase):
@@ -192,7 +192,7 @@ class TestUtils(unittest.TestCase):
         """
 
         print('\n%s can be deleted' % cls.tmp_dir)
-    def test_bbox_for(self,):
+    def test_bbox_for(self):
         """test_bbox_for - not much of a test, just a different formulation
         """
 
@@ -212,15 +212,31 @@ class TestUtils(unittest.TestCase):
         """
 
         pairs = [
-            # 1000_1210, 1017_767
-            ( Block(c=202, r=462, w=1, h=1), Block(c=238, r=177, w=1, h=1), Block(c=202, r=462, w=1, h=1) ),
-            ( Block(c=204, r=461, w=1, h=1), Block(c=240, r=176, w=1, h=1), Block(c=204, r=461, w=1, h=1) ),
-            ( Block(c=816, r=1069, w=5, h=5), Block(c=760, r=637, w=5, h=4), Block(c=816, r=1069, w=6, h=5) ),
-            ( Block(c=474, r=737, w=4, h=6), Block(c=470, r=386, w=3, h=4), Block(c=474, r=738, w=4, h=5) ),
-            ( Block(c=474, r=737, w=4, h=7), Block(c=470, r=386, w=3, h=5), Block(c=474, r=738, w=4, h=6) ),
-            ( Block(c=474, r=737, w=5, h=6), Block(c=470, r=386, w=4, h=4), Block(c=474, r=738, w=5, h=5) ),
-        ]
+            # 1000_1210,   1017_767
+            ( Block(c=202, r=462, w=1, h=1),
+              Block(c=238, r=177, w=1, h=1),
+              Block(c=202, r=462, w=1, h=1) ),
 
+            ( Block(c=204, r=461, w=1, h=1),
+              Block(c=240, r=176, w=1, h=1),
+              Block(c=204, r=461, w=1, h=1) ),
+
+            ( Block(c=816, r=1069, w=5, h=5),
+              Block(c=760, r=637, w=5, h=4),
+              Block(c=816, r=1069, w=6, h=5) ),
+
+            ( Block(c=474, r=737, w=4, h=6),
+              Block(c=470, r=386, w=3, h=4),
+              Block(c=474, r=738, w=4, h=5) ),
+
+            ( Block(c=474, r=737, w=4, h=7),
+              Block(c=470, r=386, w=3, h=5),
+              Block(c=474, r=738, w=4, h=6) ),
+
+            ( Block(c=474, r=737, w=5, h=6),
+              Block(c=470, r=386, w=4, h=4),
+              Block(c=474, r=738, w=5, h=5) ),
+        ]
 
         # dump polys
         outSHPfn = os.path.join(self.tmp_dir, "boxes.shp")
@@ -245,7 +261,6 @@ class TestUtils(unittest.TestCase):
             for n, one in enumerate(pair):
                 featureDefn = outLayer.GetLayerDefn()
                 outFeature = ogr.Feature(featureDefn)
-                # outFeature.SetGeometry(point)
                 for ch in block:
                     outFeature.SetField(ch, getattr(one, ch))
                 bbox = bbox_for(self.grids[n % 2], one)
@@ -273,7 +288,7 @@ class TestUtils(unittest.TestCase):
                 print(grid_annotations(self.grids[0]))
                 print(c0)
                 print(bbox0)
-            
+
             c1 = pair[1]
             bbox1 = bbox_for(self.grids[1], c1)
             if 0:
@@ -283,9 +298,9 @@ class TestUtils(unittest.TestCase):
                 print(c1)
                 print(bbox1)
                 print()
-                
+
             c2 = pair[2]
-            
+
             # these just test the test assumptions
             grid = self.grids[0]
             self.assertEqual(bbox0.l, grid.left + grid.sizex * c0.c)
@@ -295,12 +310,35 @@ class TestUtils(unittest.TestCase):
             sep = bbox0.l-bbox1.l
             maxsep = max(self.grids[0].sizex, self.grids[1].sizex)
             self.assertTrue(abs(sep) < maxsep, (sep, maxsep))
-        
+
             # this is the real test
             self.assertEqual(cells_for(self.grids[0], bbox0), c0)  # ~identity
             self.assertEqual(cells_for(self.grids[1], bbox1), c1)  # ~identity
             self.assertEqual(cells_for(self.grids[1], bbox0), c1)
             self.assertEqual(cells_for(self.grids[0], bbox1), c2)
+    def test_grid_match_more(self):
+        """test_grid_match - test cells_for() against cells_for_naive()
+        """
+        minx = min(i.left for i in self.grids)
+        maxx = max(i.right for i in self.grids)
+        miny = min(i.bottom for i in self.grids)
+        maxy = max(i.top for i in self.grids)
+
+        rngx = maxx - minx
+        rngy = maxy - miny
+
+        for grid in self.grids:
+            for i in range(100000):
+                x0 = minx + random.random() * rngx
+                x1 = minx + random.random() * rngx
+                y0 = miny + random.random() * rngy
+                y1 = miny + random.random() * rngy
+                if x0 > x1:
+                    x0, x1 = x1, x0
+                if y0 > y1:
+                    y0, y1 = y1, y0
+                box = BBox(l=x0, r=x1, b=y0, t=y1)
+                self.assertEqual(cells_for(grid, box), cells_for_naive(grid, box))
 def main():
     pass
 
