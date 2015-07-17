@@ -144,6 +144,48 @@ def cells_for(grid, bbox):
         w=rcol-lcol+1,
         h=brow-trow+1
     )
+class TileRunner(object):
+    """TileRunner - provide tiles for iterating a grid
+    """
+
+    def __init__(self, grid, cols=1024, rows=None):
+        """
+        :param GDAL grid grid: grid to iterate over,
+            will be annotate_grid()ed if not already
+        :param int xsize: xsize of tiles
+        :param int ysize: ysize of tiles, defaults to xsize
+        """
+        if not rows:
+            rows = cols
+        self.grid = grid
+        self.cols = cols
+        self.rows = rows
+        if not hasattr(grid, 'cols'):
+            annotate_grid(grid)
+        self.n_cols = int(grid.cols // cols)
+        if self.n_cols * cols < grid.cols:
+            self.n_cols += 1
+        self.n_rows = int(grid.rows // rows)
+        if self.n_rows * rows < grid.rows:
+            self.n_rows += 1
+
+    def __str__(self):
+        """__str__ - show properties
+        """
+
+        return "cols:{0.cols},rows:{0.rows},n_cols:{0.n_cols},n_rows:{0.n_rows}".format(self)
+    def tiles(self):
+        """tiles - generator that lists tiles for this grid as Blocks
+        """
+
+        for c in range(self.n_cols):
+            for r in range(self.n_rows):
+                yield Block(
+                    c=c*self.cols,
+                    w=self.cols,
+                    r=r*self.rows,
+                    h=self.rows
+                )
 class TestUtils(unittest.TestCase):
     """TestTest - describe class
     """
@@ -339,6 +381,30 @@ class TestUtils(unittest.TestCase):
                     y0, y1 = y1, y0
                 box = BBox(l=x0, r=x1, b=y0, t=y1)
                 self.assertEqual(cells_for(grid, box), cells_for_naive(grid, box))
+    def test_TileRunner(self):
+        """test_TileRunner -
+        """
+
+        for grid in self.grids:
+            runner = TileRunner(grid, 200, 198)
+            #D print(runner)
+            #D print(grid_annotations(grid))
+            c = r = n = 0
+            for tile in runner.tiles():
+                #D print(tile)
+                n += 1
+                if tile.r == 0:
+                    c += tile.w
+                if tile.c == 0:
+                    r += tile.h
+            # big enough
+            self.assertTrue(c >= grid.cols, (c, grid.cols))
+            self.assertTrue(r >= grid.rows, (r, grid.rows))
+            # but no bigger
+            self.assertTrue(c-tile.w < grid.cols, (c-tile.w, grid.cols))
+            self.assertTrue(r-tile.h < grid.rows, (r-tile.h, grid.rows))
+            self.assertEqual(n, runner.n_rows * runner.n_cols)
+            self.assertTrue(n*tile.w*tile.h >= grid.cols*grid.rows)
 def main():
     pass
 
