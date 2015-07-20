@@ -144,6 +144,40 @@ def cells_for(grid, bbox):
         w=rcol-lcol+1,
         h=brow-trow+1
     )
+def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor"):
+    """cells_from - re-project and re-sample subregion from grid1 to align with grid0
+
+    Must supply either block or bbox.  Assumes grids have been annotate_grid()ed.
+
+    :param grid grid0: reference grid
+    :param grid grid1: source grid
+    :param Block block: target Block in grid0
+    :param BBox bbox: target BBox in grid0
+    :param str resample: resample method, "nearest_neighbor", "bilinear", or "cubic"
+    :return: grid (annotated)
+    """
+
+    if block is None and bbox is None:
+        raise Exception("Need either block or bbox for cells_from()")
+    elif block is None:
+        block = cells_for(grid0, bbox)
+    else:
+        bbox = bbox_for(grid0, block)
+
+    resample = {
+        'nearest_neighbor': gdal.GRA_NearestNeighbour,
+        'bilinear': gdal.GRA_Bilinear,
+        'cubic': gdal.GRA_CubicSpline,
+    }[resample]
+
+    driver = gdal.GetDriverByName('MEM')
+    outRaster = driver.Create(
+        'noname', block.w, block.h, 1, grid1.GetRasterBand(1).DataType)
+    outRaster.SetGeoTransform((bbox.l, grid0.sizex, 0, bbox.t, 0, -grid0.sizey))
+    outRaster.SetProjection(grid0.GetProjection())
+    gdal.ReprojectImage(grid1, outRaster, None, None, resample)
+    annotate_grid(outRaster)
+    return outRaster
 class TileRunner(object):
     """TileRunner - provide tiles for iterating a grid
     """
@@ -178,8 +212,8 @@ class TileRunner(object):
         """tiles - generator that lists tiles for this grid as Blocks
         """
 
-        for c in range(self.n_cols):
-            for r in range(self.n_rows):
+        for r in range(self.n_rows):
+            for c in range(self.n_cols):
                 yield Block(
                     c=c*self.cols,
                     w=self.cols,
@@ -406,7 +440,30 @@ class TestUtils(unittest.TestCase):
             self.assertEqual(n, runner.n_rows * runner.n_cols)
             self.assertTrue(n*tile.w*tile.h >= grid.cols*grid.rows)
 def main():
-    pass
 
+    grid0 = gdal.Open("/mnt/usr1/scratch/marsch/marschner")
+
+    g1 = "/mnt/usr1/scratch/nlcd_2006_landcover_2011_edition_2014_10_10/" \
+         "nlcd_2006_landcover_2011_edition_2014_10_10.img"
+
+    g1 = "/home/tbrown/n/proj/MPCA_wetlnd_pri/mpca_wetland/wetland_pri_active/" \
+         "model_inputs/viability/cti_1"
+
+    g1 = "/home/tbrown/r/cti_1"
+
+    grid1 = gdal.Open(g1)
+
+    annotate_grid(grid0)
+    annotate_grid(grid1)
+
+    tr = TileRunner(grid0)
+
+    for tile in tr.tiles():
+        print tile
+        resamp = cells_from(grid0, grid1, block=tile)
+        driver = gdal.GetDriverByName('GTiff')
+        fn = "/home/tbrown/r/g/out_%04d_%04d.tif" % (
+            tile.c/tile.w, tile.r/tile.h)
+        driver.CreateCopy(fn, resamp)
 if __name__ == '__main__':
     main()
