@@ -147,7 +147,7 @@ def cells_for(grid, bbox):
 def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor"):
     """cells_from - re-project and re-sample subregion from grid1 to align with grid0
 
-    Must supply either block or bbox.  Assumes grids have been annotate_grid()ed.
+    Must supply either block or bbox.  Grids will be annotate_grid()ed if not already.
 
     :param grid grid0: reference grid
     :param grid grid1: source grid
@@ -164,6 +164,10 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
     else:
         bbox = bbox_for(grid0, block)
 
+    for grid in grid0, grid1:
+        if not hasattr(grid, 'cols'):
+            annotate_grid(grid)
+
     resample = {
         'nearest_neighbor': gdal.GRA_NearestNeighbour,
         'bilinear': gdal.GRA_Bilinear,
@@ -172,9 +176,12 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
 
     driver = gdal.GetDriverByName('MEM')
     outRaster = driver.Create(
-        'noname', block.w, block.h, 1, grid1.GetRasterBand(1).DataType)
+        'noname', block.w, block.h,
+        grid1.RasterCount, grid1.GetRasterBand(1).DataType)
     outRaster.SetGeoTransform((bbox.l, grid0.sizex, 0, bbox.t, 0, -grid0.sizey))
     outRaster.SetProjection(grid0.GetProjection())
+    outRaster.GetRasterBand(1).SetNoDataValue(grid1.GetRasterBand(1).GetNoDataValue())
+    outRaster.GetRasterBand(1).Fill(grid1.GetRasterBand(1).GetNoDataValue())
     gdal.ReprojectImage(grid1, outRaster, None, None, resample)
     annotate_grid(outRaster)
     return outRaster
