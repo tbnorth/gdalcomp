@@ -6,6 +6,7 @@ With thanks to https://pcjericks.github.io/py-gdalogr-cookbook/
 Terry Brown, Terry_N_Brown@yahoo.com, Tue Jul 14 10:29:06 2015
 """
 
+import argparse
 import os
 import random
 import sys
@@ -22,6 +23,49 @@ import numpy as np
 
 BBox = namedtuple("BBox", "l b r t")
 Block = namedtuple("Block", "c r w h")
+def make_parser():
+
+    parser = argparse.ArgumentParser(
+        description="""Raster calcs. with GDAL""",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    parser.add_argument("--grid", type=str, nargs=2, action='append',
+        help="Supply name and path for grid input"
+    )
+
+    parser.add_argument("--expr", type=str, action='append',
+        help="An expression to execute with grid names as numpy arrays"
+    )
+
+    parser.add_argument("--output-dir", type=str, default='.',
+        help="Base directory for outputs"
+    )
+
+    parser.add_argument("--output", type=str, nargs='+', action='append',
+        help="Names to output, from --expr (or --grid)", default=[]
+    )
+
+    parser.add_argument("--resample", type=str, default='nearest_neighbor',
+        help="'nearest_neighbor', 'bilinear', or 'cubic'"
+    )
+
+    parser.add_argument("--tile-cols", type=int, default=1024,
+        help="Tile width."
+    )
+    parser.add_argument("--tile-rows", type=int, default=None,
+        help="Tile height, defaults to tile width."
+    )
+    parser.add_argument("--merge-tiles", action='store_true', default=False,
+        help="Merge output tiles to single .tif."
+    )
+
+
+    #parser.add_argument('<|positional(s)|>', type=str, nargs='+',
+    #    help="<|help|>"
+    #)
+
+    return parser
 def grid_annotations(grid):
     """grid_annotations - a dict of useful info for a grid
 
@@ -180,8 +224,8 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
         grid1.RasterCount, grid1.GetRasterBand(1).DataType)
     outRaster.SetGeoTransform((bbox.l, grid0.sizex, 0, bbox.t, 0, -grid0.sizey))
     outRaster.SetProjection(grid0.GetProjection())
-    outRaster.GetRasterBand(1).SetNoDataValue(grid1.GetRasterBand(1).GetNoDataValue())
-    outRaster.GetRasterBand(1).Fill(grid1.GetRasterBand(1).GetNoDataValue())
+    outRaster.GetRasterBand(1).SetNoDataValue(grid0.GetRasterBand(1).GetNoDataValue())
+    outRaster.GetRasterBand(1).Fill(grid0.GetRasterBand(1).GetNoDataValue())
     gdal.ReprojectImage(grid1, outRaster, None, None, resample)
     annotate_grid(outRaster)
     return outRaster
@@ -221,11 +265,13 @@ class TileRunner(object):
 
         for r in range(self.n_rows):
             for c in range(self.n_cols):
+                tc = max(0, c*self.cols)
+                tr = max(0, r*self.rows)
                 yield Block(
-                    c=c*self.cols,
-                    w=self.cols,
-                    r=r*self.rows,
-                    h=self.rows
+                    c=tc,
+                    w=int(min(self.cols, self.grid.cols-tc)),
+                    r=tr,
+                    h=int(min(self.rows, self.grid.rows-tr))
                 )
 class TestUtils(unittest.TestCase):
     """TestTest - describe class
@@ -448,29 +494,64 @@ class TestUtils(unittest.TestCase):
             self.assertTrue(n*tile.w*tile.h >= grid.cols*grid.rows)
 def main():
 
-    grid0 = gdal.Open("/mnt/usr1/scratch/marsch/marschner")
+    opt = make_parser().parse_args()
 
-    g1 = "/mnt/usr1/scratch/nlcd_2006_landcover_2011_edition_2014_10_10/" \
-         "nlcd_2006_landcover_2011_edition_2014_10_10.img"
+    grids = {}
+    for name, path in opt.grid:
+        grid = gdal.Open(path)
+        if not grid:
+            raise Exception("Failed to open '%s' - '%s'" % (name, path))
+        annotate_grid(grid)
+        grids[name] = grid
 
-    g1 = "/home/tbrown/n/proj/MPCA_wetlnd_pri/mpca_wetland/wetland_pri_active/" \
-         "model_inputs/viability/cti_1"
-
-    g1 = "/home/tbrown/r/cti_1"
-
-    grid1 = gdal.Open(g1)
-
-    annotate_grid(grid0)
-    annotate_grid(grid1)
-
-    tr = TileRunner(grid0)
-
+    ref_grid = grids[opt.grid[0][0]]
+    tr = TileRunner(ref_grid, opt.tile_cols, opt.tile_rows)
+    driver = gdal.GetDriverByName('GTiff')
     for tile in tr.tiles():
         print tile
-        resamp = cells_from(grid0, grid1, block=tile)
-        driver = gdal.GetDriverByName('GTiff')
-        fn = "/home/tbrown/r/g/out_%04d_%04d.tif" % (
-            tile.c/tile.w, tile.r/tile.h)
-        driver.CreateCopy(fn, resamp)
+        context = {
+            'NP': np,
+            'NoData': ref_grid.GetRasterBand(1).GetNoDataValue(),
+        }
+        # FIXME: handle bands
+        context[opt.grid[0][0]] = ref_grid.GetRasterBand(1).ReadAsArray(
+            tile.c, tile.r, tile.w, tile.h)
+
+        for name, path in opt.grid[1:]:
+            cells_datasource = cells_from(ref_grid, grids[name], block=tile, resample=opt.resample)
+            context[name] = cells_datasource.GetRasterBand(1).ReadAsArray()
+
+        for expr in opt.expr:
+            name, expr = expr.split('=', 1)
+            name = name.strip()
+            context[name] = eval(expr, context)
+
+        for output in opt.output:
+            name = output[0]
+            if len(output) > 1:
+                path = os.path.join(output[1], 'tiles')
+            else:
+                path = os.path.join(opt.output_dir, name, 'tiles')
+            cells_datasource.GetRasterBand(1).WriteArray(context[name])
+
+            if not os.path.exists(path):
+                os.makedirs(path)
+            fn = os.path.join(path, "%s_%04d_%04d.tif" % (
+                name, tile.c/tile.w, tile.r/tile.h))
+            print fn
+            driver.CreateCopy(fn, cells_datasource)
+
+    # now make VRT
+    for output in opt.output:
+        name = output[0]
+        if len(output) > 1:
+            path = os.path.join(output[1])
+        else:
+            path = os.path.join(opt.output_dir, name)
+        os.system("gdalbuildvrt %s/%s.vrt %s/tiles/*.tif" % (
+            path, name, path))
+        if opt.merge_tiles:
+            os.system("gdal_translate %s/%s.vrt %s/%s.tif" % (
+                path, name, path, name))
 if __name__ == '__main__':
     main()
