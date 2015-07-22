@@ -26,16 +26,23 @@ Block = namedtuple("Block", "c r w h")
 def make_parser():
 
     parser = argparse.ArgumentParser(
-        description="""Raster calcs. with GDAL""",
+        description="""Raster calcs. with GDAL.
+        The first --grid defines the project, extent, cell size, and origin
+        for all calculations, all other grids are transformed and resampled
+        as needed to match.""",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
-    parser.add_argument("--grid", type=str, nargs=2, action='append',
-        help="Supply name and path for grid input"
+    parser.add_argument("--grid", type=str, nargs='*', action='append',
+        help="""Supply name, path, and resample method for grid input.
+        Resample method is ignored for the first --grid, and defaults
+        to 'neared_neighbor'.  Alternatives are 'bilinear' and
+        'cubic'"""
     )
 
     parser.add_argument("--expr", type=str, action='append',
-        help="An expression to execute with grid names as numpy arrays"
+        help="""A statement to execute with grid names as numpy arrays,
+        of the form `<var> = <expr>`, e.g. `wl = mwl & (cti >= 10.5)`"""
     )
 
     parser.add_argument("--output-dir", type=str, default='.',
@@ -44,10 +51,6 @@ def make_parser():
 
     parser.add_argument("--output", type=str, nargs='+', action='append',
         help="Names to output, from --expr (or --grid)", default=[]
-    )
-
-    parser.add_argument("--resample", type=str, default='nearest_neighbor',
-        help="'nearest_neighbor', 'bilinear', or 'cubic'"
     )
 
     parser.add_argument("--tile-cols", type=int, default=1024,
@@ -62,8 +65,17 @@ def make_parser():
     parser.add_argument("--tiles-only",
         help="Space separated list of tiles to process, e.g. '1,1 1,2 5,5'"
     )
+    parser.add_argument("--overlap-cols", type=int, default=0,
+        help="NOT IMPLEMENTED Tile overlap for kernel filters etc."
+    )
+    parser.add_argument("--overlap-rows", type=int, default=None,
+        help="""NOT IMPLEMENTED Tile overlap for kernel filters etc.
+        Defaults to `overlap-cols`"""
+    )
 
-
+    parser.add_argument("--import", type=str, action='append', default=[],
+        help="NOT IMPLEMENTED `import *` from the named module into the execution environment"
+    )
 
 
     #parser.add_argument('<|positional(s)|>', type=str, nargs='+',
@@ -238,7 +250,7 @@ class TileRunner(object):
     """TileRunner - provide tiles for iterating a grid
     """
 
-    def __init__(self, grid, cols=1024, rows=None):
+    def __init__(self, grid, cols=1024, rows=None, overlap_cols=0, overlap_rows=None):
         """
         :param GDAL grid grid: grid to iterate over,
             will be annotate_grid()ed if not already
@@ -247,9 +259,13 @@ class TileRunner(object):
         """
         if not rows:
             rows = cols
+        if overlap_rows is None:
+            overlap_rows = overlap_cols
         self.grid = grid
         self.cols = cols
         self.rows = rows
+        self.overlap_cols = overlap_cols
+        self.overlap_rows = overlap_rows
         if not hasattr(grid, 'cols'):
             annotate_grid(grid)
         self.n_cols = int(grid.cols // cols)
@@ -258,6 +274,8 @@ class TileRunner(object):
         self.n_rows = int(grid.rows // rows)
         if self.n_rows * rows < grid.rows:
             self.n_rows += 1
+
+    Tile = namedtuple("Tile", "tile_col tile_row block")
 
     def __str__(self):
         """__str__ - show properties
@@ -270,14 +288,63 @@ class TileRunner(object):
 
         for r in range(self.n_rows):
             for c in range(self.n_cols):
-                tc = max(0, c*self.cols)
-                tr = max(0, r*self.rows)
-                yield Block(
-                    c=tc,
-                    w=int(min(self.cols, self.grid.cols-tc)),
-                    r=tr,
-                    h=int(min(self.rows, self.grid.rows-tr))
-                )
+                yield self.tile_calc(c, r)
+    def tile_calc(self, c, r, use_overlap=True):
+        """tile_calc - calculate tile bounds, with or without overlap
+
+        :param int c: *tile* column, not grid column
+        :param int r: tile row
+        :param bool use_overlap: use or ignore overlap
+        :return: tile
+        :rtype: Tile
+        """
+
+        if use_overlap:
+            overlap_cols = self.overlap_cols
+            overlap_rows = self.overlap_rows
+        else:
+            overlap_cols = 0
+            overlap_rows = 0
+
+        tc = max(0, c*self.cols-overlap_cols)
+        tr = max(0, r*self.rows-overlap_rows)
+
+        return self.Tile(tile_col=c, tile_row=r, block=Block(
+            c=tc,
+            w=int(min(self.cols+2*overlap_cols, self.grid.cols-tc)),
+            r=tr,
+            h=int(min(self.rows+2*overlap_rows, self.grid.rows-tr))
+        ))
+
+    def trim_datasource(self, datasource, tile):
+        """trim_datasource - return a copy of datasource with the overlap edges trimmed off
+
+        :param GDAL datasource: datasource to trim
+        :return: GDAL datasource
+        """
+
+        overlap = self.tile_calc(tile.tile_col, tile.tile_row, use_overlap=True).block
+        trimmed = self.tile_calc(tile.tile_col, tile.tile_row, use_overlap=False).block
+
+        driver = gdal.GetDriverByName('MEM')
+        outRaster = driver.Create(
+            'noname', trimmed.w, trimmed.h,
+            datasource.RasterCount, datasource.GetRasterBand(1).DataType)
+        # FIXME: handle bands
+        in_col = trimmed.c-overlap.c
+        in_row = trimmed.r-overlap.r
+        outRaster.SetGeoTransform((
+            datasource.left+datasource.sizex*in_col,
+            datasource.sizex, 0,
+            datasource.top-datasource.sizey*in_row,
+            0, -datasource.sizey))
+        outRaster.SetProjection(datasource.GetProjection())
+        outRaster.GetRasterBand(1).SetNoDataValue(datasource.GetRasterBand(1).GetNoDataValue())
+        outRaster.GetRasterBand(1).Fill(datasource.GetRasterBand(1).GetNoDataValue())
+        data = datasource.GetRasterBand(1).ReadAsArray(in_col, in_row, trimmed.w, trimmed.h)
+        outRaster.GetRasterBand(1).WriteArray(data)
+        annotate_grid(outRaster)
+        return outRaster
 class TestUtils(unittest.TestCase):
     """TestTest - describe class
     """
@@ -502,15 +569,22 @@ def main():
     opt = make_parser().parse_args()
 
     grids = {}
-    for name, path in opt.grid:
+    for name_path_resample in opt.grid:
+        name, path = name_path_resample[:2]
+        if len(name_path_resample) > 2:
+            resample = name_path_resample[2]
+        else:
+            resample = 'nearest_neighbor'
         grid = gdal.Open(path)
         if not grid:
             raise Exception("Failed to open '%s' - '%s'" % (name, path))
         annotate_grid(grid)
+        grid.resample = resample
         grids[name] = grid
 
     ref_grid = grids[opt.grid[0][0]]
-    tr = TileRunner(ref_grid, opt.tile_cols, opt.tile_rows)
+    tr = TileRunner(ref_grid, opt.tile_cols, opt.tile_rows,
+        overlap_cols=opt.overlap_cols, overlap_rows=opt.overlap_rows)
     driver = gdal.GetDriverByName('GTiff')
 
     tiles_only = []
@@ -520,7 +594,7 @@ def main():
 
     for tile in tr.tiles():
 
-        t_c, t_r = tile.c/tr.cols, tile.r/tr.rows
+        t_c, t_r = tile.tile_col, tile.tile_row
         if tiles_only and (t_c, t_r) not in tiles_only:
             continue
 
@@ -530,11 +604,14 @@ def main():
             'NoData': ref_grid.GetRasterBand(1).GetNoDataValue(),
         }
         # FIXME: handle bands
+        block = tile.block
         context[opt.grid[0][0]] = ref_grid.GetRasterBand(1).ReadAsArray(
-            tile.c, tile.r, tile.w, tile.h)
+            block.c, block.r, block.w, block.h)
 
-        for name, path in opt.grid[1:]:
-            cells_datasource = cells_from(ref_grid, grids[name], block=tile, resample=opt.resample)
+        for name_path_resample in opt.grid[1:]:
+            name, path = name_path_resample[:2]
+            cells_datasource = cells_from(
+                ref_grid, grids[name], block=block, resample=grids[name].resample)
             context[name] = cells_datasource.GetRasterBand(1).ReadAsArray()
 
         for expr in opt.expr or []:
@@ -550,12 +627,14 @@ def main():
                 path = os.path.join(opt.output_dir, name, 'tiles')
             cells_datasource.GetRasterBand(1).WriteArray(context[name])
 
+            trimmed = tr.trim_datasource(cells_datasource, tile)
+
             if not os.path.exists(path):
                 os.makedirs(path)
             fn = os.path.join(path, "%s_%04d_%04d.tif" % (
                 name, t_c, t_r))
             print fn
-            driver.CreateCopy(fn, cells_datasource)
+            driver.CreateCopy(fn, trimmed)
 
     # now make VRT
     for output in opt.output:
