@@ -56,9 +56,14 @@ def make_parser():
     parser.add_argument("--tile-rows", type=int, default=None,
         help="Tile height, defaults to tile width."
     )
-    parser.add_argument("--merge-tiles", action='store_true', default=False,
+    parser.add_argument("--tiles-merge", action='store_true', default=False,
         help="Merge output tiles to single .tif."
     )
+    parser.add_argument("--tiles-only",
+        help="Space separated list of tiles to process, e.g. '1,1 1,2 5,5'"
+    )
+
+
 
 
     #parser.add_argument('<|positional(s)|>', type=str, nargs='+',
@@ -507,7 +512,18 @@ def main():
     ref_grid = grids[opt.grid[0][0]]
     tr = TileRunner(ref_grid, opt.tile_cols, opt.tile_rows)
     driver = gdal.GetDriverByName('GTiff')
+
+    tiles_only = []
+    if opt.tiles_only:
+        tiles_only = [tuple(map(int, i.split(','))) for i in opt.tiles_only.split()]
+        print tiles_only
+
     for tile in tr.tiles():
+
+        t_c, t_r = tile.c/tr.cols, tile.r/tr.rows
+        if tiles_only and (t_c, t_r) not in tiles_only:
+            continue
+
         print tile
         context = {
             'NP': np,
@@ -521,7 +537,7 @@ def main():
             cells_datasource = cells_from(ref_grid, grids[name], block=tile, resample=opt.resample)
             context[name] = cells_datasource.GetRasterBand(1).ReadAsArray()
 
-        for expr in opt.expr:
+        for expr in opt.expr or []:
             name, expr = expr.split('=', 1)
             name = name.strip()
             context[name] = eval(expr, context)
@@ -537,7 +553,7 @@ def main():
             if not os.path.exists(path):
                 os.makedirs(path)
             fn = os.path.join(path, "%s_%04d_%04d.tif" % (
-                name, tile.c/tile.w, tile.r/tile.h))
+                name, t_c, t_r))
             print fn
             driver.CreateCopy(fn, cells_datasource)
 
@@ -550,7 +566,7 @@ def main():
             path = os.path.join(opt.output_dir, name)
         os.system("gdalbuildvrt %s/%s.vrt %s/tiles/*.tif" % (
             path, name, path))
-        if opt.merge_tiles:
+        if opt.tiles_merge:
             os.system("gdal_translate %s/%s.vrt %s/%s.tif" % (
                 path, name, path, name))
 if __name__ == '__main__':
