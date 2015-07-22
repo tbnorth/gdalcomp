@@ -11,6 +11,7 @@ import os
 import random
 import sys
 import unittest
+from math import *
 
 from collections import namedtuple
 from hashlib import sha1
@@ -66,15 +67,16 @@ def make_parser():
         help="Space separated list of tiles to process, e.g. '1,1 1,2 5,5'"
     )
     parser.add_argument("--overlap-cols", type=int, default=0,
-        help="NOT IMPLEMENTED Tile overlap for kernel filters etc."
+        help="Tile overlap for kernel filters etc."
     )
     parser.add_argument("--overlap-rows", type=int, default=None,
-        help="""NOT IMPLEMENTED Tile overlap for kernel filters etc.
+        help="""Tile overlap for kernel filters etc.
         Defaults to `overlap-cols`"""
     )
 
-    parser.add_argument("--import", type=str, action='append', default=[],
-        help="NOT IMPLEMENTED `import *` from the named module into the execution environment"
+    parser.add_argument("--import", type=str, action='append', nargs=2, default=[],
+        help="""`import foo.bar as bar` in the execution environment.
+        `import numpy as NP` is done automatically."""
     )
 
 
@@ -564,7 +566,63 @@ class TestUtils(unittest.TestCase):
             self.assertTrue(r-tile.h < grid.rows, (r-tile.h, grid.rows))
             self.assertEqual(n, runner.n_rows * runner.n_cols)
             self.assertTrue(n*tile.w*tile.h >= grid.cols*grid.rows)
+def hemi_kernel(size):
+    """hemi_kernel - make a hemispherical kernel
+
+    :param int size: size of kernel
+    :return: kernel
+    :rtype: numpy float array
+    """
+    hs = size // 2  # half size
+    maxr = sqrt(pow(hs+0.5, 2))  # max. radius
+    ans = []
+
+    for r in range(-hs, hs+1):
+        ans.append([])
+        for c in range(-hs, hs+1):
+            rad = sqrt(r*r+c*c)
+            if rad > maxr:
+                ans[-1].append(0)
+            else:
+                ans[-1].append(sin(acos(float(rad)/maxr)))
+
+    return np.array(ans)
+def apply_kernel(array, kernel, f=lambda x: sum(x)/len(x)):
+    """apply_kernel -
+
+    :param type array array: describe array
+    :return:
+    :rtype: <|return type|>
+    """
+    ans = np.zeros(array.size).reshape(array.shape)
+    h, w = kernel.shape
+    for r in range(array.shape[0]):
+        for c in range(array.shape[1]):
+            ktr = -min(0, r - h / 2)  # above by
+            klc = -min(0, c - w / 2)  # left by
+            kbr = -min(0, array.shape[0] - (r + h / 2 + 1))  # below by
+            krc = -min(0, array.shape[1] - (c + w / 2 + 1))  # right by
+            print r, c, ktr, klc, kbr, krc
+            array_clip = array[r-h/2+ktr:r+h/2-kbr+1, c-w/2+klc:c+w/2-krc+1]
+            print array_clip
+            kernel_clip = kernel[ktr:h-kbr, klc:w-krc]
+            print kernel_clip
+            vals = (array_clip * kernel_clip).reshape(kernel_clip.size)
+            ans[r,c] = f(vals)
+            # print r, c, r+h/2, c+w/2, ans[r+h/2,c+w/2]
+            # print ans
+            print
+    return ans
 def main():
+
+    x = np.arange(100).reshape(10,10)
+    k = hemi_kernel(5)
+    # print x
+    # print k
+    a = apply_kernel(x, k)
+    print a
+    print x
+    exit()
 
     opt = make_parser().parse_args()
 
@@ -592,6 +650,13 @@ def main():
         tiles_only = [tuple(map(int, i.split(','))) for i in opt.tiles_only.split()]
         print tiles_only
 
+    context = {
+        'NP': np,
+        'NoData': ref_grid.GetRasterBand(1).GetNoDataValue(),
+    }
+    for module, name in getattr(opt, 'import'):
+        context[name] = __import__(module)
+
     for tile in tr.tiles():
 
         t_c, t_r = tile.tile_col, tile.tile_row
@@ -599,10 +664,6 @@ def main():
             continue
 
         print tile
-        context = {
-            'NP': np,
-            'NoData': ref_grid.GetRasterBand(1).GetNoDataValue(),
-        }
         # FIXME: handle bands
         block = tile.block
         context[opt.grid[0][0]] = ref_grid.GetRasterBand(1).ReadAsArray(
@@ -615,9 +676,10 @@ def main():
             context[name] = cells_datasource.GetRasterBand(1).ReadAsArray()
 
         for expr in opt.expr or []:
-            name, expr = expr.split('=', 1)
-            name = name.strip()
-            context[name] = eval(expr, context)
+            # name, expr = expr.split('=', 1)
+            # name = name.strip()
+            # context[name] = eval(expr, context)
+            exec expr in context
 
         for output in opt.output:
             name = output[0]
