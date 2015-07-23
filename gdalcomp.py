@@ -570,6 +570,27 @@ class TestUtils(unittest.TestCase):
             self.assertTrue(r-tile.h < grid.rows, (r-tile.h, grid.rows))
             self.assertEqual(n, runner.n_rows * runner.n_cols)
             self.assertTrue(n*tile.w*tile.h >= grid.cols*grid.rows)
+def circ_kernel(size):
+    """circhemi_kernel - make a circular kernel
+
+    :param int size: size of kernel, even numbers treated as size+1
+    :return: kernel
+    :rtype: numpy float array
+    """
+    hs = size // 2  # half size
+    maxr = sqrt(pow(hs+0.5, 2))  # max. radius
+    ans = []
+
+    for r in range(-hs, hs+1):
+        ans.append([])
+        for c in range(-hs, hs+1):
+            rad = sqrt(r*r+c*c)
+            if rad > maxr:
+                ans[-1].append(0)
+            else:
+                ans[-1].append(1)
+
+    return np.array(ans)
 def hemi_kernel(size):
     """hemi_kernel - make a hemispherical kernel
 
@@ -591,14 +612,14 @@ def hemi_kernel(size):
                 ans[-1].append(sin(acos(float(rad)/maxr)))
 
     return np.array(ans)
-def apply_kernel(array, kernel, f=lambda x: sum(x)/len(x)):
+def apply_kernel(array, kernel, NoData, f=lambda x,k: sum(x*k)/sum(k)):
     """apply_kernel -
 
     :param type array array: describe array
     :return:
     :rtype: <|return type|>
     """
-    ans = np.zeros(array.size).reshape(array.shape)
+    ans = np.repeat(NoData, array.size).reshape(array.shape)
     h, w = kernel.shape
     DBG = False
     for r in range(array.shape[0]):
@@ -609,11 +630,17 @@ def apply_kernel(array, kernel, f=lambda x: sum(x)/len(x)):
             krc = -min(0, array.shape[1] - (c + w / 2 + 1))  # right by
             if DBG: print r, c, ktr, klc, kbr, krc
             array_clip = array[r-h/2+ktr:r+h/2-kbr+1, c-w/2+klc:c+w/2-krc+1]
+            mask = array_clip != NoData
+            array_clip = array_clip[mask]
+            if array_clip.size == 0:
+                continue
             if DBG: print array_clip
             kernel_clip = kernel[ktr:h-kbr, klc:w-krc]
+            kernel_clip = kernel_clip[mask]
             if DBG: print kernel_clip
-            vals = (array_clip * kernel_clip).reshape(kernel_clip.size)
-            ans[r,c] = f(vals)
+            # vals = (array_clip * kernel_clip) # .reshape(kernel_clip.size)
+            ans[r,c] = f(array_clip, kernel_clip)
+            if DBG: print ans[r,c]
             if DBG: print
     return ans
 def main():
@@ -652,13 +679,16 @@ def main():
     tiles_only = []
     if opt.tiles_only:
         tiles_only = [tuple(map(int, i.split(','))) for i in opt.tiles_only.split()]
-        print tiles_only
 
     context = {
         'NP': np,
         'GC': gdalcomp,
         'NoData': ref_grid.GetRasterBand(1).GetNoDataValue(),
     }
+    for name_path_resample in opt.grid:
+        name = name_path_resample[0]
+        context['%s_NoData' % name] = grids[name].GetRasterBand(1).GetNoDataValue()
+
     for module, name in getattr(opt, 'import'):
         context[name] = __import__(module)
 
