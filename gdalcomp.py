@@ -306,7 +306,7 @@ def make_datasource(driver, path, ref=None, w=None, h=None, bands=1, type_=None,
 
     outRaster = driver.Create(path, w, h, bands, type_)
     # FIXME: handle bands
-    outRaster.SetGeoTransform((left, sizex, 0, top, 0, sizey))
+    outRaster.SetGeoTransform((left, sizex, 0, top, 0, -sizey))
     outRaster.SetProjection(proj)
     outRaster.GetRasterBand(1).SetNoDataValue(NoData)
     outRaster.GetRasterBand(1).Fill(NoData)
@@ -635,18 +635,19 @@ class TestUtils(unittest.TestCase):
             for tile in runner.tiles():
                 #D print(tile)
                 n += 1
-                if tile.r == 0:
-                    c += tile.w
-                if tile.c == 0:
-                    r += tile.h
+                if tile.block.r == 0:
+                    c += tile.block.w
+                if tile.block.c == 0:
+                    r += tile.block.h
             # big enough
             self.assertTrue(c >= grid.cols, (c, grid.cols))
             self.assertTrue(r >= grid.rows, (r, grid.rows))
             # but no bigger
-            self.assertTrue(c-tile.w < grid.cols, (c-tile.w, grid.cols))
-            self.assertTrue(r-tile.h < grid.rows, (r-tile.h, grid.rows))
+            self.assertTrue(c-tile.block.w < grid.cols, (c-tile.block.w, grid.cols))
+            self.assertTrue(r-tile.block.h < grid.rows, (r-tile.block.h, grid.rows))
             self.assertEqual(n, runner.n_rows * runner.n_cols)
-            self.assertTrue(n*tile.w*tile.h >= grid.cols*grid.rows)
+            # use runner, not tile here, last tile may be partial
+            self.assertTrue(n*runner.cols*runner.rows >= grid.cols*grid.rows)
 def circ_kernel(size):
     """circhemi_kernel - make a circular kernel
 
