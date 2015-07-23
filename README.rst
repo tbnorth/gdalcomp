@@ -49,3 +49,9 @@ python gdalcomp.py \
       --do "agrid = GC.apply_kernel(agrid, k, agrid_NoData)" \
       --overlap-cols 5 \
       --blocks 1 6
+
+python gdalcomp.py \
+      --grid agrid /mnt/usr1/scratch/marsch/marschner \
+      --output-dir /tmp/test \
+      --output agrid \
+      --cpus 8

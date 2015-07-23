@@ -25,6 +25,23 @@ import gdalcomp
 
 BBox = namedtuple("BBox", "l b r t")
 Block = namedtuple("Block", "c r w h")
+
+# copied / adapted from http://pythonhosted.org/six/
+if sys.version_info[0] >= 3:
+    exec_ = eval('exec')
+else:
+    def exec_(_code_, _globs_=None, _locs_=None):
+        """Execute code in a namespace."""
+        if _globs_ is None:
+            frame = sys._getframe(1)
+            _globs_ = frame.f_globals
+            if _locs_ is None:
+                _locs_ = frame.f_locals
+            del frame
+        elif _locs_ is None:
+            _locs_ = _globs_
+        exec("""exec _code_ in _globs_, _locs_""")
+
 def make_parser():
 
     parser = argparse.ArgumentParser(
@@ -143,15 +160,15 @@ def cells_for_naive(grid, bbox):
     """
 
     # simple implementation
-    #D print (bbox)
-    #D print ((bbox.l - grid.left) / grid.sizex)
+    #D print(bbox)
+    #D print((bbox.l - grid.left) / grid.sizex)
 
     lcol = (bbox.l - grid.left) / grid.sizex
     if lcol - int(lcol) > 0.5:
         lcol += 1
     lcol = int(lcol)
 
-    #D print ((bbox.r - grid.left) / grid.sizex)
+    #D print((bbox.r - grid.left) / grid.sizex)
     rcol = (bbox.r - grid.left) / grid.sizex
     if rcol - int(rcol) < 0.5:
         rcol -= 1
@@ -247,8 +264,8 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
 
     outRaster = make_datasource(
         gdal.GetDriverByName('MEM'), 'noname', ref=grid0,
-        cols=block.w, rows=block.h,
-        left=bbox.l, top=bbot.t,
+        w=block.w, h=block.h,
+        left=bbox.l, top=bbox.t,
         type_=grid1.GetRasterBand(1).DataType,  # not grid0
         bands=grid1.RasterCount,
     )
@@ -688,35 +705,39 @@ def apply_kernel(array, kernel, NoData, f=lambda x,k: sum(x*k)/sum(k)):
     DBG = False
     for r in range(array.shape[0]):
         for c in range(array.shape[1]):
-            ktr = -min(0, r - h / 2)  # above by
-            klc = -min(0, c - w / 2)  # left by
-            kbr = -min(0, array.shape[0] - (r + h / 2 + 1))  # below by
-            krc = -min(0, array.shape[1] - (c + w / 2 + 1))  # right by
-            if DBG: print r, c, ktr, klc, kbr, krc
-            array_clip = array[r-h/2+ktr:r+h/2-kbr+1, c-w/2+klc:c+w/2-krc+1]
+            ktr = -min(0, r - h // 2)  # above by
+            klc = -min(0, c - w // 2)  # left by
+            kbr = -min(0, array.shape[0] - (r + h // 2 + 1))  # below by
+            krc = -min(0, array.shape[1] - (c + w // 2 + 1))  # right by
+            if DBG: print(r, c, ktr, klc, kbr, krc)
+            array_clip = array[r-h//2+ktr:r+h//2-kbr+1, c-w//2+klc:c+w//2-krc+1]
             mask = array_clip != NoData
             array_clip = array_clip[mask]
             if array_clip.size == 0:
                 continue
-            if DBG: print array_clip
+            if DBG: print(array_clip)
             kernel_clip = kernel[ktr:h-kbr, klc:w-krc]
             kernel_clip = kernel_clip[mask]
-            if DBG: print kernel_clip
+            if DBG: print(kernel_clip)
             # vals = (array_clip * kernel_clip) # .reshape(kernel_clip.size)
             ans[r,c] = f(array_clip, kernel_clip)
-            if DBG: print ans[r,c]
+            if DBG: print(ans[r,c])
             if DBG: print
     return ans
+def class_in(data, classes):
+    """class_in -
+
+    :param <|type data|> data: <|describe data|>
+    :param <|type classes|> classes: <|describe classes|>
+    :return: <|returns|>
+    :rtype: <|return type|>
+    """
+
+    return np.in1d(data.reshape(data.size), classes).reshape(data.shape)
 def main():
 
-    if 0:
-        x = np.arange(100).reshape(10,10)
-        k = hemi_kernel(3)
-        print x
-        print k
-        a = apply_kernel(x, k)
-        print a
-        print x
+    if os.path.exists("gdalcomp.stop"):
+        print("Exiting because 'gdalcomp.stop' exists.")
         exit()
 
     opt = make_parser().parse_args()
@@ -730,7 +751,6 @@ def main():
             del sys.argv[idx]  # and the argument
         for i in range(1, opt.cpus+1):
             cmd = "python %s --block %s %s &" % (' '.join(repr(j) for j in sys.argv), i, opt.cpus)
-            print cmd
             os.system(cmd)
         exit()
 
@@ -768,7 +788,7 @@ def main():
         if block * N < total:
             block += 1
 
-        print "Doing blocks %d-%d of %d %d tile blocks" % (n0, n1, N, block)
+        print("Doing blocks %d-%d of %d %d tile blocks" % (n0, n1, N, block))
 
         for c in range(tr.n_cols):
             for r in range(tr.n_rows):
@@ -789,18 +809,19 @@ def main():
         context[name] = __import__(module)
 
     for setup in opt.setup or []:
-        exec setup in context
+        exec_(setup, context)
 
     for tile in tr.tiles():
 
         if os.path.exists("gdalcomp.stop"):
+            print("Exiting because 'gdalcomp.stop' exists.")
             break
 
         t_c, t_r = tile.tile_col, tile.tile_row
         if tiles_only and (t_c, t_r) not in tiles_only:
             continue
 
-        print tile
+        print(tile)
         # FIXME: handle bands
         block = tile.block
         context[opt.grid[0][0]] = ref_grid.GetRasterBand(1).ReadAsArray(
@@ -813,7 +834,7 @@ def main():
             context[name] = cells_datasource.GetRasterBand(1).ReadAsArray()
 
         for do in opt.do or []:
-            exec do in context
+            exec_(do, context)
 
         for output in opt.output:
             bbox = bbox_for(ref_grid, block)
@@ -844,10 +865,12 @@ def main():
                 os.makedirs(path)
             fn = os.path.join(path, "%s_%04d_%04d.tif" % (
                 name, t_c, t_r))
-            print fn
+            print(fn)
             driver.CreateCopy(fn, trimmed)
 
     # now make VRT
+    if tiles_only:
+        print("\nPartial calc., skipping commands:\n")
     for output in opt.output:
         name = output[0]
         if ':' in name:
@@ -856,10 +879,19 @@ def main():
             path = os.path.join(output[1])
         else:
             path = os.path.join(opt.output_dir, name)
-        os.system("gdalbuildvrt %s/%s.vrt %s/tiles/*.tif" % (
-            path, name, path))
+        cmd = "gdalbuildvrt %s/%s.vrt %s/tiles/*.tif" % (
+            path, name, path)
+        if tiles_only:
+            print(cmd)
+        else:
+            os.system(cmd)
         if opt.tiles_merge:
-            os.system("gdal_translate %s/%s.vrt %s/%s.tif" % (
-                path, name, path, name))
+            cmd = "gdal_translate %s/%s.vrt %s/%s.tif" % (
+                path, name, path, name)
+            if tiles_only:
+                print(cmd)
+            else:
+                os.system(cmd)
+
 if __name__ == '__main__':
     main()
