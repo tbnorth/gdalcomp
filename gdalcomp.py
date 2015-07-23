@@ -21,6 +21,7 @@ from osgeo import ogr
 from osgeo import osr
 
 import numpy as np
+import gdalcomp
 
 BBox = namedtuple("BBox", "l b r t")
 Block = namedtuple("Block", "c r w h")
@@ -41,9 +42,11 @@ def make_parser():
         'cubic'"""
     )
 
-    parser.add_argument("--expr", type=str, action='append',
-        help="""A statement to execute with grid names as numpy arrays,
-        of the form `<var> = <expr>`, e.g. `wl = mwl & (cti >= 10.5)`"""
+    parser.add_argument("--do", type=str, action='append',
+        help="""A statement to execute with grid names as numpy arrays"""
+    )
+    parser.add_argument("--setup", type=str, action='append',
+        help="""Like --do, but only done once, before tile processing starts"""
     )
 
     parser.add_argument("--output-dir", type=str, default='.',
@@ -51,7 +54,7 @@ def make_parser():
     )
 
     parser.add_argument("--output", type=str, nargs='+', action='append',
-        help="Names to output, from --expr (or --grid)", default=[]
+        help="Names to output, from --do (or --grid or --setup)", default=[]
     )
 
     parser.add_argument("--tile-cols", type=int, default=1024,
@@ -76,7 +79,7 @@ def make_parser():
 
     parser.add_argument("--import", type=str, action='append', nargs=2, default=[],
         help="""`import foo.bar as bar` in the execution environment.
-        `import numpy as NP` is done automatically."""
+        `import numpy as NP` and `import gdalcomp as GC` done automatically."""
     )
 
 
@@ -569,7 +572,7 @@ class TestUtils(unittest.TestCase):
 def hemi_kernel(size):
     """hemi_kernel - make a hemispherical kernel
 
-    :param int size: size of kernel
+    :param int size: size of kernel, even numbers treated as size+1
     :return: kernel
     :rtype: numpy float array
     """
@@ -596,33 +599,33 @@ def apply_kernel(array, kernel, f=lambda x: sum(x)/len(x)):
     """
     ans = np.zeros(array.size).reshape(array.shape)
     h, w = kernel.shape
+    DBG = False
     for r in range(array.shape[0]):
         for c in range(array.shape[1]):
             ktr = -min(0, r - h / 2)  # above by
             klc = -min(0, c - w / 2)  # left by
             kbr = -min(0, array.shape[0] - (r + h / 2 + 1))  # below by
             krc = -min(0, array.shape[1] - (c + w / 2 + 1))  # right by
-            print r, c, ktr, klc, kbr, krc
+            if DBG: print r, c, ktr, klc, kbr, krc
             array_clip = array[r-h/2+ktr:r+h/2-kbr+1, c-w/2+klc:c+w/2-krc+1]
-            print array_clip
+            if DBG: print array_clip
             kernel_clip = kernel[ktr:h-kbr, klc:w-krc]
-            print kernel_clip
+            if DBG: print kernel_clip
             vals = (array_clip * kernel_clip).reshape(kernel_clip.size)
             ans[r,c] = f(vals)
-            # print r, c, r+h/2, c+w/2, ans[r+h/2,c+w/2]
-            # print ans
-            print
+            if DBG: print
     return ans
 def main():
 
-    x = np.arange(100).reshape(10,10)
-    k = hemi_kernel(5)
-    # print x
-    # print k
-    a = apply_kernel(x, k)
-    print a
-    print x
-    exit()
+    if 0:
+        x = np.arange(100).reshape(10,10)
+        k = hemi_kernel(3)
+        print x
+        print k
+        a = apply_kernel(x, k)
+        print a
+        print x
+        exit()
 
     opt = make_parser().parse_args()
 
@@ -652,10 +655,14 @@ def main():
 
     context = {
         'NP': np,
+        'GC': gdalcomp,
         'NoData': ref_grid.GetRasterBand(1).GetNoDataValue(),
     }
     for module, name in getattr(opt, 'import'):
         context[name] = __import__(module)
+
+    for setup in opt.setup or []:
+        exec setup in context
 
     for tile in tr.tiles():
 
@@ -675,11 +682,8 @@ def main():
                 ref_grid, grids[name], block=block, resample=grids[name].resample)
             context[name] = cells_datasource.GetRasterBand(1).ReadAsArray()
 
-        for expr in opt.expr or []:
-            # name, expr = expr.split('=', 1)
-            # name = name.strip()
-            # context[name] = eval(expr, context)
-            exec expr in context
+        for do in opt.do or []:
+            exec do in context
 
         for output in opt.output:
             name = output[0]
