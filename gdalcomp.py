@@ -76,6 +76,9 @@ def make_parser():
         help="""Tile overlap for kernel filters etc.
         Defaults to `overlap-cols`"""
     )
+    parser.add_argument("--blocks", type=str, nargs=2,
+        help="""'1 4' - divide tiles into 4 blocks and do block 1.
+        '6-8 10' - divide tiles into 10 blocks and do blocks 6, 7, and 8.""")
 
     parser.add_argument("--import", type=str, action='append', nargs=2, default=[],
         help="""`import foo.bar as bar` in the execution environment.
@@ -734,6 +737,25 @@ def main():
     tiles_only = []
     if opt.tiles_only:
         tiles_only = [tuple(map(int, i.split(','))) for i in opt.tiles_only.split()]
+    if opt.blocks:
+        n0n1, N = opt.blocks
+        N = int(N)
+        if '-' in n0n1:
+            n0, n1 = map(int, n0n1.split('-'))
+        else:
+            n0 = n1 = int(n0n1)
+        total = tr.n_cols * tr.n_rows
+        block = int(total // N)
+        if block * N < total:
+            block += 1
+
+        print "Doing blocks %d-%d of %d %d tile blocks" % (n0, n1, N, block)
+
+        for c in range(tr.n_cols):
+            for r in range(tr.n_rows):
+                if n0-1 <= (r*tr.n_cols+c) / block <= n1-1:
+                    tiles_only.append((c, r))
+
 
     context = {
         'NP': np,
