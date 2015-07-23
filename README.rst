@@ -1,3 +1,8 @@
+
+.. note::
+
+    Right now this is new code under heavy development / design
+
 gdalcomp.py
 ===========
 
