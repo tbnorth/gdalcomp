@@ -46,7 +46,7 @@ def make_parser():
 
     parser = argparse.ArgumentParser(
         description="""Raster calcs. with GDAL.
-        The first --grid defines the project, extent, cell size, and origin
+        The first --grid defines the projection, extent, cell size, and origin
         for all calculations, all other grids are transformed and resampled
         as needed to match.""",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -55,7 +55,7 @@ def make_parser():
     parser.add_argument("--grid", type=str, nargs='*', action='append',
         help="""Supply name, path, and resample method for grid input.
         Resample method is ignored for the first --grid, and defaults
-        to 'neared_neighbor'.  Alternatives are 'bilinear' and
+        to 'neared_neighbor' others.  Alternatives are 'bilinear' and
         'cubic'"""
     )
 
@@ -75,10 +75,10 @@ def make_parser():
     )
 
     parser.add_argument("--tile-cols", type=int, default=1024,
-        help="Tile width."
+        help="Tile width.  If zero, one large tile the same size as the grid is used."
     )
     parser.add_argument("--tile-rows", type=int, default=None,
-        help="Tile height, defaults to tile width."
+        help="Tile height, defaults to tile width (--tile-cols)."
     )
     parser.add_argument("--tiles-merge", action='store_true', default=False,
         help="Merge output tiles to single .tif."
@@ -325,6 +325,9 @@ class TileRunner(object):
         """
         if not rows:
             rows = cols
+        if not cols:  # then use full extent of grid
+            cols = grid.cols
+            rows = grid.rows
         if overlap_rows is None:
             overlap_rows = overlap_cols
         self.grid = grid
