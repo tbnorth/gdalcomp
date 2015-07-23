@@ -79,6 +79,8 @@ def make_parser():
     parser.add_argument("--blocks", type=str, nargs=2,
         help="""'1 4' - divide tiles into 4 blocks and do block 1.
         '6-8 10' - divide tiles into 10 blocks and do blocks 6, 7, and 8.""")
+    parser.add_argument("--cpus", type=int, metavar='N',
+        help="""Use --blocks to run N background jobs on this machine.""")
 
     parser.add_argument("--import", type=str, action='append', nargs=2, default=[],
         help="""`import foo.bar as bar` in the execution environment.
@@ -678,6 +680,10 @@ def apply_kernel(array, kernel, NoData, f=lambda x,k: sum(x*k)/sum(k)):
     :rtype: <|return type|>
     """
     ans = np.repeat(NoData, array.size).reshape(array.shape)
+
+    if np.all(array == NoData):
+        return ans
+
     h, w = kernel.shape
     DBG = False
     for r in range(array.shape[0]):
@@ -714,6 +720,19 @@ def main():
         exit()
 
     opt = make_parser().parse_args()
+
+    if opt.cpus:
+        while '--cpus' in sys.argv:
+            # very important to remove the all
+            # if the child processes launch more proceccess we can crash the system
+            idx = sys.argv.index('--cpus')
+            del sys.argv[idx]
+            del sys.argv[idx]  # and the argument
+        for i in range(1, opt.cpus+1):
+            cmd = "python %s --block %s %s &" % (' '.join(repr(j) for j in sys.argv), i, opt.cpus)
+            print cmd
+            os.system(cmd)
+        exit()
 
     grids = {}
     for name_path_resample in opt.grid:
@@ -773,6 +792,9 @@ def main():
         exec setup in context
 
     for tile in tr.tiles():
+
+        if os.path.exists("gdalcomp.stop"):
+            break
 
         t_c, t_r = tile.tile_col, tile.tile_row
         if tiles_only and (t_c, t_r) not in tiles_only:
