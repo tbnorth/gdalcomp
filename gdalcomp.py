@@ -246,8 +246,9 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
         grid1.RasterCount, grid1.GetRasterBand(1).DataType)
     outRaster.SetGeoTransform((bbox.l, grid0.sizex, 0, bbox.t, 0, -grid0.sizey))
     outRaster.SetProjection(grid0.GetProjection())
-    outRaster.GetRasterBand(1).SetNoDataValue(grid0.GetRasterBand(1).GetNoDataValue())
-    outRaster.GetRasterBand(1).Fill(grid0.GetRasterBand(1).GetNoDataValue())
+    NoData = grid0.GetRasterBand(1).GetNoDataValue() or 0  # FIXME -ve max value better?
+    outRaster.GetRasterBand(1).SetNoDataValue(NoData)
+    outRaster.GetRasterBand(1).Fill(NoData)
     gdal.ReprojectImage(grid1, outRaster, None, None, resample)
     annotate_grid(outRaster)
     return outRaster
@@ -691,6 +692,7 @@ def main():
                 path = os.path.join(output[1], 'tiles')
             else:
                 path = os.path.join(opt.output_dir, name, 'tiles')
+            # FIXME cells_datasource only defined if more than one grid
             cells_datasource.GetRasterBand(1).WriteArray(context[name])
 
             trimmed = tr.trim_datasource(cells_datasource, tile)
