@@ -53,8 +53,8 @@ def make_parser():
         help="Base directory for outputs"
     )
 
-    parser.add_argument("--output", type=str, nargs='+', action='append',
-        help="Names to output, from --do (or --grid or --setup)", default=[]
+    parser.add_argument("--output", type=str, nargs='+', action='append', default=[],
+        help="Names to output, from --do (or --grid or --setup)"
     )
 
     parser.add_argument("--tile-cols", type=int, default=1024,
@@ -240,6 +240,17 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
         'cubic': gdal.GRA_CubicSpline,
     }[resample]
 
+    outRaster = make_datasource(
+        gdal.GetDriverByName('MEM'), 'noname', ref=grid0,
+        cols=block.w, rows=block.h,
+        left=bbox.l, top=bbot.t,
+        type_=grid1.GetRasterBand(1).DataType,  # not grid0
+        bands=grid1.RasterCount,
+    )
+    gdal.ReprojectImage(grid1, outRaster, None, None, resample)
+
+    return outRaster
+
     driver = gdal.GetDriverByName('MEM')
     outRaster = driver.Create(
         'noname', block.w, block.h,
@@ -250,6 +261,33 @@ def cells_from(grid0, grid1, block=None, bbox=None, resample="nearest_neighbor")
     outRaster.GetRasterBand(1).SetNoDataValue(NoData)
     outRaster.GetRasterBand(1).Fill(NoData)
     gdal.ReprojectImage(grid1, outRaster, None, None, resample)
+    annotate_grid(outRaster)
+    return outRaster
+def make_datasource(driver, path, ref=None, w=None, h=None, bands=1, type_=None,
+                   top=None, left=None, sizex=None, sizey=None, proj=None, NoData=None):
+
+    if ref is not None:
+        attrib = grid_annotations(ref)
+    if w is None: w = attrib['cols']
+    if h is None: h = attrib['rows']
+    if left is None: left = attrib['left']
+    if top is None: top = attrib['top']
+    if sizex is None: sizex = attrib['sizex']
+    if sizey is None: sizey = attrib['sizey']
+    if bands is None: bands = ref.nBands
+    if type_ is None: type_ = ref.GetRasterBand(1).DataType
+    if proj is None: proj = ref.GetProjection()
+    if NoData is None and ref:
+        NoData = ref.GetRasterBand(1).GetNoDataValue()
+    else:
+        raise Exception("Type specific nodata needed")
+
+    outRaster = driver.Create(path, w, h, bands, type_)
+    # FIXME: handle bands
+    outRaster.SetGeoTransform((left, sizex, 0, top, 0, sizey))
+    outRaster.SetProjection(proj)
+    outRaster.GetRasterBand(1).SetNoDataValue(NoData)
+    outRaster.GetRasterBand(1).Fill(NoData)
     annotate_grid(outRaster)
     return outRaster
 class TileRunner(object):
@@ -329,10 +367,26 @@ class TileRunner(object):
         :return: GDAL datasource
         """
 
+        #? if not self.overlap_cols and not self.overlap_rows:
+        #?     return datasource
+
         overlap = self.tile_calc(tile.tile_col, tile.tile_row, use_overlap=True).block
         trimmed = self.tile_calc(tile.tile_col, tile.tile_row, use_overlap=False).block
 
-        driver = gdal.GetDriverByName('MEM')
+        in_col = trimmed.c-overlap.c
+        in_row = trimmed.r-overlap.r
+
+        outRaster = make_datasource(
+            gdal.GetDriverByName('MEM'), 'noname', ref=datasource,
+            w=trimmed.w, h=trimmed.h,
+            left=datasource.left+datasource.sizex*in_col,
+            top=datasource.top-datasource.sizey*in_row,
+        )
+        data = datasource.GetRasterBand(1).ReadAsArray(in_col, in_row, trimmed.w, trimmed.h)
+        outRaster.GetRasterBand(1).WriteArray(data)
+
+        return outRaster
+
         outRaster = driver.Create(
             'noname', trimmed.w, trimmed.h,
             datasource.RasterCount, datasource.GetRasterBand(1).DataType)
@@ -351,6 +405,7 @@ class TileRunner(object):
         outRaster.GetRasterBand(1).WriteArray(data)
         annotate_grid(outRaster)
         return outRaster
+
 class TestUtils(unittest.TestCase):
     """TestTest - describe class
     """
@@ -717,15 +772,29 @@ def main():
             exec do in context
 
         for output in opt.output:
+            bbox = bbox_for(ref_grid, block)
             name = output[0]
+            if ':' in name:
+                name, type_ = name.split(':', 1)
+                type_ = gdal.GetDataTypeByName(type_)
+            else:
+                type_ = None
+            if name in grids:
+                ref = grids[name]
+            else:
+                ref = ref_grid
+            output_datasource = make_datasource(
+                gdal.GetDriverByName('MEM'), 'noname', ref=ref, type_=type_,
+                w=block.w, h=block.h,
+                left=bbox.l, top=bbox.t,
+            )
             if len(output) > 1:
                 path = os.path.join(output[1], 'tiles')
             else:
                 path = os.path.join(opt.output_dir, name, 'tiles')
-            # FIXME cells_datasource only defined if more than one grid
-            cells_datasource.GetRasterBand(1).WriteArray(context[name])
+            output_datasource.GetRasterBand(1).WriteArray(context[name])
 
-            trimmed = tr.trim_datasource(cells_datasource, tile)
+            trimmed = tr.trim_datasource(output_datasource, tile)
 
             if not os.path.exists(path):
                 os.makedirs(path)
@@ -737,6 +806,8 @@ def main():
     # now make VRT
     for output in opt.output:
         name = output[0]
+        if ':' in name:
+            name, type_ = name.split(':', 1)
         if len(output) > 1:
             path = os.path.join(output[1])
         else:
