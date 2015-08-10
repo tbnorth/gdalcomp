@@ -779,7 +779,15 @@ def main():
 
     tiles_only = []
     if opt.tiles_only:
-        tiles_only = [tuple(map(int, i.split(','))) for i in opt.tiles_only.split()]
+        specs = opt.tiles_only.split()
+        for spec in specs:
+            rows, cols = spec.split(',')
+            rows = map(int, rows.split('-'))
+            cols = map(int, cols.split('-'))
+            for r in range(rows[0], rows[-1]+1):
+                for c in range(cols[0], cols[-1]+1):
+                    tiles_only.append((r, c))
+
     if opt.blocks:
         n0n1, N = opt.blocks
         N = int(N)
@@ -822,7 +830,7 @@ def main():
             break
 
         t_c, t_r = tile.tile_col, tile.tile_row
-        if tiles_only and (t_c, t_r) not in tiles_only:
+        if tiles_only and (t_r, t_c) not in tiles_only:
             continue
 
         print(tile)
