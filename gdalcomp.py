@@ -796,18 +796,25 @@ def main():
         else:
             n0 = n1 = int(n0n1)
         total = tr.n_cols * tr.n_rows
+        if tiles_only:
+            total = len(tiles_only)
         block = int(total // N)
         if block * N < total:
             block += 1
 
         print("Doing blocks %d-%d of %d %d tile blocks" % (n0, n1, N, block))
 
-        for c in range(tr.n_cols):
-            for r in range(tr.n_rows):
-                if n0-1 <= (r*tr.n_cols+c) / block <= n1-1:
-                    tiles_only.append((c, r))
-
-
+        full_tiles_only = list(tiles_only)
+        tiles_only = []
+        if full_tiles_only:
+            for i in range(len(full_tiles_only)):
+                if n0-1 <= i // block <= n1-1:
+                    tiles_only.append(full_tiles_only[i])
+        else:
+            for c in range(tr.n_cols):
+                for r in range(tr.n_rows):
+                    if n0-1 <= (r*tr.n_cols+c) / block <= n1-1:
+                        tiles_only.append((c, r))
     context = {
         'NP': np,
         'GC': gdalcomp,
