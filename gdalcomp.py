@@ -652,7 +652,7 @@ class TestUtils(unittest.TestCase):
             # use runner, not tile here, last tile may be partial
             self.assertTrue(n*runner.cols*runner.rows >= grid.cols*grid.rows)
 def circ_kernel(size):
-    """circhemi_kernel - make a circular kernel
+    """circ_kernel - make a circular kernel
 
     :param int size: size of kernel, even numbers treated as size+1
     :return: kernel
@@ -830,6 +830,11 @@ def main():
         block = tile.block
         context[opt.grid[0][0]] = ref_grid.GetRasterBand(1).ReadAsArray(
             block.c, block.r, block.w, block.h)
+
+        context['_tile_col'] = t_c
+        context['_tile_row'] = t_r
+        context['_tile_w'] = block.w
+        context['_tile_h'] = block.h
 
         for name_path_resample in opt.grid[1:]:
             name, path = name_path_resample[:2]
