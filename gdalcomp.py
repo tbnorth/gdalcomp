@@ -300,7 +300,7 @@ def make_datasource(driver, path, ref=None, w=None, h=None, bands=1, type_=None,
     if type_ is None: type_ = ref.GetRasterBand(1).DataType
     if proj is None: proj = ref.GetProjection()
     if NoData is None and ref:
-        NoData = ref.GetRasterBand(1).GetNoDataValue()
+        NoData = ref.GetRasterBand(1).GetNoDataValue() or -9999
     else:
         raise Exception("Type specific nodata needed")
 
@@ -901,6 +901,7 @@ def main():
             name, type_ = name.split(':', 1)
         if len(output) > 1:
             path = os.path.join(output[1])
+            name = os.path.basename(path)
         else:
             path = os.path.join(opt.output_dir, name)
         cmd = "gdalbuildvrt %s/%s.vrt %s/tiles/*.tif" % (
