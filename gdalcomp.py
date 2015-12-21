@@ -194,7 +194,7 @@ def cells_for_naive(grid, bbox):
         rcol = lcol = int((bbox.l + (bbox.r-bbox.l)/2. - grid.left) / grid.sizex)
     if brow < trow:
         assert brow == trow - 1
-        brow = trow = int(grid.top - (bbox.t + (bbox.t-bbox.b)/2.) / grid.sizey)
+        brow = trow = int((grid.top - (bbox.t + (bbox.t-bbox.b)/2.)) / grid.sizey)
 
     assert rcol >= lcol, (rcol, lcol, bbox)
     assert brow >= trow, (brow, trow, bbox)
@@ -224,7 +224,7 @@ def cells_for(grid, bbox):
     if rcol < lcol:
         rcol = lcol = int((bbox.l + (bbox.r-bbox.l)/2. - grid.left) / grid.sizex)
     if brow < trow:
-        brow = trow = int(grid.top - (bbox.t + (bbox.t-bbox.b)/2.) / grid.sizey)
+        brow = trow = int((grid.top - (bbox.t + (bbox.t-bbox.b)/2.)) / grid.sizey)
 
     return Block(
         c=lcol,
@@ -846,6 +846,7 @@ def main():
         context[opt.grid[0][0]] = ref_grid.GetRasterBand(1).ReadAsArray(
             block.c, block.r, block.w, block.h)
 
+        context['_tile'] = tile
         context['_tile_col'] = t_c
         context['_tile_row'] = t_r
         context['_tile_w'] = block.w
